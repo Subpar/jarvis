@@ -43,13 +43,15 @@ DEFAULTS: dict[str, Any] = {
     "sync": {},  # {enabled, folder, include_secrets}: encrypted backup and sync between PCs (backup.py)
     "apps": {},  # built-in app connections: app -> its plain settings (apps.py); tokens live in secrets
     "a2a_server": False,  # other agents on this PC may ask JARVIS for things (a2a.py)
+    "privacy_mode": "strict",  # strict: local providers only; guarded: cloud with per-message consent
     "provider": "gemini",
     "provider_config": {},
     "secrets": {},
 }
 PROFILE_FIELDS = ("user_name", "address", "proactive_alerts", "voice_enabled", "voice_mode", "startup_briefing",
                   "full_control", "permissions", "presence_greetings", "followups", "onboarded", "instructions",
-                  "language", "calendars", "calendar_outlook", "heartbeat", "sync", "apps", "a2a_server", "theme")
+                  "language", "calendars", "calendar_outlook", "heartbeat", "sync", "apps", "a2a_server", "theme",
+                  "privacy_mode")
 PROVIDER_FIELDS = ("chat_model", "embed_model", "base_url")
 
 
@@ -107,6 +109,8 @@ class SettingsStore:
         with self._lock:
             for k, v in values.items():
                 if k in PROFILE_FIELDS:
+                    if k == "privacy_mode" and v not in ("strict", "guarded"):
+                        raise ValueError(f"privacy_mode must be 'strict' or 'guarded', got '{v}'")
                     self._data[k] = v
             self._save()
 
@@ -228,4 +232,5 @@ class SettingsStore:
             "api_key_hint": f"…{key[-4:]}" if len(key) >= 8 else "",
             "providers_with_keys": keyed,
             "load_error": self.load_error,
+            "provider_is_local": PRESETS[pid].get("is_local", False),
         }

@@ -239,6 +239,7 @@ class SettingsIn(BaseModel):
     theme: Literal["scifi", "dark", "light"] | None = None
     calendar_outlook: bool | None = None
     permissions: dict[str, str] | None = None
+    privacy_mode: Literal["strict", "guarded"] | None = None
     provider: str | None = None
     api_key: str | None = Field(default=None, max_length=300)
     base_url: str | None = Field(default=None, max_length=300)
@@ -273,6 +274,10 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=20000)
     conversation_id: str | None = None
     voice: bool = False  # spoken aloud; the reply will be read out
+    # Guarded mode: per-message cloud consent fields
+    cloud_consent: bool = False  # user explicitly consents to sending this message to a cloud provider
+    cloud_provider: str | None = None  # provider ID the consent applies to (must match active provider)
+    cloud_model: str | None = None  # model the consent applies to (must match active model)
 
 
 class VoiceIn(BaseModel):
@@ -460,7 +465,7 @@ def build_router(svc: Services, require_auth: Callable[..., None]) -> APIRouter:
         changes = body.model_dump(exclude_unset=True)
         profile = {k: changes.pop(k) for k in ("user_name", "address", "proactive_alerts", "startup_briefing",
                                                    "full_control", "permissions", "presence_greetings", "followups", "onboarded", "instructions",
-                                                   "language", "calendar_outlook", "theme") if k in changes}
+                                                   "language", "calendar_outlook", "theme", "privacy_mode") if k in changes}
         if "permissions" in profile:
             bad = {k: v for k, v in (profile["permissions"] or {}).items() if k not in permissions.CAPABILITIES or v not in permissions.POLICIES}
             if bad:
@@ -561,6 +566,49 @@ def build_router(svc: Services, require_auth: Callable[..., None]) -> APIRouter:
     @r.post("/models/test")
     async def models_test(body: ModelTestIn) -> dict[str, Any]:
         return await svc.llm.test_model(body.model)
+
+    # ---------------- guarded mode: verification & audit ----------------
+
+    @r.post("/provider/verify")
+    async def verify_provider() -> dict[str, Any]:
+        """Run a synthetic non-sensitive probe to verify cloud provider connectivity.
+
+        Must be called before any cloud requests in guarded mode. The probe sends
+        a JSON echo request (no user data) and records pass/fail in the audit trail.
+        """
+        from .guarded import SYNTHETIC_PROMPT, SYNTHETIC_SCHEMA
+        if not svc.llm.guarded:
+            raise HTTPException(status_code=501, detail="Guarded mode controller is not initialised.")
+        pid = svc.settings.provider
+        if PRESETS[pid].get("is_local", False):
+            return {"provider_id": pid, "verified": True, "detail": "Local provider; verification not required."}
+        svc.llm.guarded.audit.record(
+            __import__("jarvis_backend.guarded", fromlist=["AuditEventType"]).AuditEventType.PROVIDER_VERIFY_START,
+            provider_id=pid, model=svc.llm.chat_model,
+        )
+        try:
+            t0 = time.monotonic()
+            result = await svc.llm.test_model(svc.llm.chat_model)
+            latency = int((time.monotonic() - t0) * 1000)
+            ok = result.get("status") == "ok"
+            svc.llm.guarded.record_verification(pid, svc.llm.chat_model, ok=ok, latency_ms=latency,
+                                                 error="" if ok else str(result))
+            return {"provider_id": pid, "verified": ok, "latency_ms": latency, "result": result}
+        except (LLMError, LLMNotConfigured) as e:
+            svc.llm.guarded.record_verification(pid, svc.llm.chat_model, ok=False, error=str(e))
+            raise HTTPException(status_code=502, detail=f"Provider verification failed: {e}") from e
+
+    @r.get("/provider/verify")
+    async def verification_status() -> dict[str, Any]:
+        if not svc.llm.guarded:
+            return {"verifications": []}
+        return {"verifications": svc.llm.guarded.all_verification_statuses()}
+
+    @r.get("/audit")
+    async def audit_log(n: int = 50) -> dict[str, Any]:
+        if not svc.llm.guarded:
+            return {"entries": []}
+        return {"entries": svc.llm.guarded.audit.recent(min(n, 500))}
 
     # ---------------- conversations ----------------
 
@@ -1525,6 +1573,31 @@ def build_router(svc: Services, require_auth: Callable[..., None]) -> APIRouter:
                 status_code=409,
                 content={"error": "not_configured", "message": "No AI provider is connected yet. Choose one and add your API key in Settings."},
             )
+        # ── Guarded mode: validate consent fields ───────────────────────
+        from .guarded import consent_matches, AuditEventType as AET
+        cloud_consent = body.cloud_consent
+        if cloud_consent:
+            if not consent_matches(body.cloud_provider, body.cloud_model,
+                                   svc.settings.provider, svc.llm.chat_model):
+                if svc.llm.guarded:
+                    svc.llm.guarded.audit.record(
+                        AET.CLOUD_CONSENT_MISMATCH,
+                        provider_id=svc.settings.provider,
+                        detail=f"consent for {body.cloud_provider}/{body.cloud_model} but active is {svc.settings.provider}/{svc.llm.chat_model}",
+                    )
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "consent_mismatch",
+                             "message": "Your consent does not match the active provider/model. "
+                                        f"You consented to {body.cloud_provider}/{body.cloud_model} but "
+                                        f"the active selection is {svc.settings.provider}/{svc.llm.chat_model}."},
+                )
+        # ── Guarded mode: early access check ────────────────────────────
+        if err := svc.llm.check_cloud_access(consent=cloud_consent):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "cloud_blocked", "message": err},
+            )
         now = time.time()
         if body.conversation_id:
             _conv_or_404(body.conversation_id)
@@ -1647,7 +1720,8 @@ def build_router(svc: Services, require_auth: Callable[..., None]) -> APIRouter:
                                       effort=lambda: "high" if task.plan else "medium",
                                       on_thought=lambda t: setattr(task, "thought", t[-400:]),
                                       advise=advise,
-                                      on_step=lambda: progress.__setitem__("at", time.monotonic()))
+                                      on_step=lambda: progress.__setitem__("at", time.monotonic()),
+                                      cloud_consent=cloud_consent)
                 )
                 task.agent = agent_task
                 stalled = False

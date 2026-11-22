@@ -9,6 +9,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gateway": {
         "name": "Local AI gateway (OpenAI-compatible)",
         "needs_key": False,
+        "is_local": True,
         "base_url": "http://127.0.0.1:20128/v1",  # not localhost: on Windows that tries IPv6 first
         "key_hint": "Start your OpenAI-compatible gateway, set its base URL, and paste its key if it uses one.",
         "embeddings": True,
@@ -18,6 +19,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gemini": {
         "name": "Google Gemini",
         "needs_key": True,
+        "is_local": False,
         "base_url": "",
         "key_hint": "Create a key at aistudio.google.com (has a free tier).",
         "embeddings": True,
@@ -25,6 +27,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "openai": {
         "name": "OpenAI",
         "needs_key": True,
+        "is_local": False,
         "base_url": "https://api.openai.com/v1",
         "key_hint": "Create a key at platform.openai.com/api-keys.",
         "embeddings": True,
@@ -32,6 +35,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "anthropic": {
         "name": "Anthropic Claude",
         "needs_key": True,
+        "is_local": False,
         "base_url": "",
         "key_hint": "Create a key at console.anthropic.com. Claude has no embeddings, so memory uses keyword search.",
         "embeddings": False,
@@ -39,6 +43,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "openrouter": {
         "name": "OpenRouter",
         "needs_key": True,
+        "is_local": False,
         "base_url": "https://openrouter.ai/api/v1",
         "key_hint": "One key for hundreds of models. Create it at openrouter.ai/keys.",
         "embeddings": True,
@@ -46,6 +51,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "ollama": {
         "name": "Ollama (local, free)",
         "needs_key": False,
+        "is_local": True,
         "base_url": "http://localhost:11434/v1",
         "key_hint": "Runs models on this PC. Install from ollama.com, then e.g. `ollama pull llama3.2` and `ollama pull nomic-embed-text`.",
         "embeddings": True,
@@ -53,6 +59,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "custom": {
         "name": "Other OpenAI-compatible",
         "needs_key": False,
+        "is_local": False,  # assumed cloud; user can override via settings if running locally
         "base_url": "",
         "key_hint": "Groq, DeepSeek, Together, Mistral, LM Studio and others: enter their OpenAI-compatible base URL and key.",
         "embeddings": True,

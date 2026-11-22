@@ -17,6 +17,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, TypeVar
 from .providers import PRESETS, Provider, ProviderError, make_provider, provider_class
 from .providers.base import NETWORK_ERROR, NO_REPLY, Step, ToolCall, tools_unsupported
 from . import gateway
+from .guarded import GuardedModeController, cloud_access_error, AuditEventType
 from .settings import SettingsStore
 from .usage import QuotaTracker, next_reset
 
@@ -77,8 +78,9 @@ def describe(e: ProviderError, provider: str, model: str | None) -> LLMError:
 
 
 class LLM:
-    def __init__(self, settings: SettingsStore) -> None:
+    def __init__(self, settings: SettingsStore, guarded: GuardedModeController | None = None) -> None:
         self.settings = settings
+        self.guarded = guarded
         self._provider: Provider | None = None
         self._signature: tuple[str, str, str] | None = None
         self._models_cache: list[dict[str, Any]] | None = None
@@ -142,6 +144,28 @@ class LLM:
         pid = self.provider_id
         has_key = bool(self.settings.api_key(pid)) or not PRESETS[pid]["needs_key"]
         return has_key and bool(self.settings.provider_cfg(pid)["chat_model"])
+
+    @property
+    def provider_is_local(self) -> bool:
+        return PRESETS.get(self.provider_id, {}).get("is_local", False)
+
+    def check_cloud_access(self, consent: bool = False) -> str | None:
+        """Check whether the current provider is allowed under the active privacy mode.
+
+        Returns an error message if blocked, None if allowed.
+        This gate is called at the entry of every chat/agent request AND again
+        immediately before the first actual provider call (double-check pattern
+        from ChatGPT's server.py).
+        """
+        if self.guarded is None:
+            return None  # no guarded controller → legacy behaviour, allow all
+        pid = self.provider_id
+        return self.guarded.check_access(
+            privacy_mode=self.settings.get("privacy_mode") or "strict",
+            provider_id=pid,
+            provider_is_local=self.provider_is_local,
+            consent_given=consent,
+        )
 
     # ---------- models ----------
 
@@ -391,8 +415,12 @@ class LLM:
     # ---------- operations ----------
 
     async def stream_chat(
-        self, system: str, history: list[tuple[str, str]], on_notice: Callable[[str], None] | None = None
+        self, system: str, history: list[tuple[str, str]], on_notice: Callable[[str], None] | None = None,
+        cloud_consent: bool = False,
     ) -> AsyncIterator[str]:
+        # ── Guarded mode gate (entry check) ─────────────────────────────
+        if err := self.check_cloud_access(consent=cloud_consent):
+            raise LLMError(err)
         p = self.provider()
         preferred = self.chat_model
         candidates = await self._chat_candidates()
@@ -403,6 +431,9 @@ class LLM:
             model = queue.pop(0)
             started = False
             try:
+                # ── Guarded mode gate (pre-call double-check) ────────────
+                if err := self.check_cloud_access(consent=cloud_consent):
+                    raise LLMError(err)
                 stream = p.stream_chat(model, system, history).__aiter__()
                 while True:
                     try:
@@ -483,11 +514,15 @@ class LLM:
         on_thought: Callable[[str], None] | None = None,
         advise: Callable[[int, list[tuple[ToolCall, dict[str, Any]]]], Awaitable[str | None]] | None = None,
         on_step: Callable[[], None] | None = None,
+        cloud_consent: bool = False,
     ) -> str:
         """Let the model call tools until it produces a final answer. Returns that answer.
 
         The first step may fall back to any available model. Later steps (after tools ran) can
         only move to another model when the session is portable; see _next_step."""
+        # ── Guarded mode gate (entry check) ─────────────────────────────
+        if err := self.check_cloud_access(consent=cloud_consent):
+            raise LLMError(err)
         p = self.provider()
         preferred = self.chat_model
         session = p.tool_session(system, history, tools)
@@ -501,6 +536,9 @@ class LLM:
         while queue:
             candidate = queue.pop(0)
             try:
+                # ── Guarded mode gate (pre-call double-check) ────────────
+                if err := self.check_cloud_access(consent=cloud_consent):
+                    raise LLMError(err)
                 step = await _timed(session.step(candidate))
                 model = candidate
                 self._ok(candidate)

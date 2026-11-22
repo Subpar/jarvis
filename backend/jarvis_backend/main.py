@@ -87,7 +87,13 @@ def create_app(port: int, token: str | None = None) -> FastAPI:
                 return
 
     settings = SettingsStore(data_dir() / "settings.dat")
-    llm = LLM(settings)
+    from .guarded import GuardedModeController
+    guarded = GuardedModeController(audit_path=data_dir() / "audit.jsonl")
+    guarded.audit.record(
+        __import__("jarvis_backend.guarded", fromlist=["AuditEventType"]).AuditEventType.PRIVACY_MODE_SET,
+        detail=f"startup privacy_mode={settings.get('privacy_mode')}",
+    )
+    llm = LLM(settings, guarded=guarded)
     db = DB(data_dir() / "jarvis.db")
     llm.usage = QuotaTracker(db)
     llm.usage.prune()
