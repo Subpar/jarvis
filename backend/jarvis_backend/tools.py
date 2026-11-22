@@ -20,6 +20,7 @@ class ToolSpec:
     agent_action: str | None = None  # None: handled inside the backend
     timeout: float = 20.0
     label: str = ""  # short present-tense description for the UI, may use {arg} placeholders
+    external_transmission: bool = False  # True: this tool sends data to an external service
 
     def schema(self) -> dict[str, Any]:
         return {"name": self.name, "description": self.description, "parameters": self.parameters}
@@ -45,7 +46,8 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("close_app", "Close a running application by its executable name, e.g. 'chrome', 'notepad', 'spotify'. Unsaved work in it may be lost.",
              obj({"name": S}, ["name"]), risk="confirm", agent_action="close_app", label="Close {name}"),
     ToolSpec("open_url", "Open a web address in the default browser, or in a specific browser (chrome, edge, firefox, brave, opera).",
-             obj({"url": S, "browser": S}, ["url"]), agent_action="open_url", label="Opening {url}"),
+             obj({"url": S, "browser": S}, ["url"]), agent_action="open_url", label="Opening {url}",
+             external_transmission=True),
     ToolSpec("my_location", "Where this PC is right now: coordinates, the area's name, and whether it is exact (Windows location) "
              "or approximate (from the internet connection). Use it for anything 'near me', local weather or time, never the "
              "user's home town from chat or memory.",
@@ -55,18 +57,23 @@ TOOLS: list[ToolSpec] = [
              "Use this for any place, shop, restaurant, cafe, hospital, ATM, petrol pump or 'near me' question; one search "
              "is enough, and it reuses one Maps tab.",
              obj({"query": S, "near": S, "min_rating": {"type": "number"}, "limit": I}, ["query"]), agent_action="maps_search",
-             timeout=90, label="Searching Google Maps for {query}"),
+             timeout=90, label="Searching Google Maps for {query}",
+             external_transmission=True),
     ToolSpec("maps_directions", "Directions on Google Maps from the user's location (or origin) to destination: time and distance "
              "of each route. mode: driving (default), walking, transit, bicycling or two-wheeler.",
              obj({"destination": S, "origin": S, "mode": S}, ["destination"]), agent_action="maps_directions", timeout=90,
-             label="Getting directions to {destination}"),
+             label="Getting directions to {destination}",
+             external_transmission=True),
     ToolSpec("web_search", "Open a search results page in the browser for the user to look at. Engines: google, bing, duckduckgo, youtube, github, wikipedia, amazon, maps.",
-             obj({"query": S, "engine": S, "browser": S}, ["query"]), agent_action="web_search", label="Searching for {query}"),
+             obj({"query": S, "engine": S, "browser": S}, ["query"]), agent_action="web_search", label="Searching for {query}",
+             external_transmission=True),
     ToolSpec("web_research", "Search the web yourself and read the top results to answer a factual or current-events question directly, with sources. Use this instead of web_search when the user wants an answer, not a browser tab.",
-             obj({"query": S}, ["query"]), timeout=60, label="Researching {query}"),
+             obj({"query": S}, ["query"]), timeout=60, label="Researching {query}",
+             external_transmission=True),
     ToolSpec("read_webpage", "Read one web page or online PDF the user names or that came up in research, and get the passages "
              "answering question (or the start of the page). Use it to check a source or follow a link. Public internet only.",
-             obj({"url": S, "question": S}, ["url"]), timeout=60, label="Reading {url}"),
+             obj({"url": S, "question": S}, ["url"]), timeout=60, label="Reading {url}",
+             external_transmission=True),
     # Shopping and food ordering run in JARVIS's own browser: hidden, in the background (its own profile).
     ToolSpec("show_browser", "Show JARVIS's background browser inside the JARVIS app, so the user can watch it, sign in, link WhatsApp "
              "or review and pay for a cart. Only when the user asks to see the browser (or agrees to when you offer).",
@@ -76,7 +83,8 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("web_open", "Open a page in JARVIS's background browser (hidden; the user does not see it unless they ask), e.g. a store's search URL: https://www.amazon.in/s?k=..., "
              "https://www.flipkart.com/search?q=..., https://www.swiggy.com/search?query=..., https://www.zomato.com, https://www.dominos.co.in. "
              "Use this (not open_url) when the user wants something bought or ordered.",
-             obj({"url": S}, ["url"]), agent_action="web_open", timeout=45, label="Opening {url}"),
+             obj({"url": S}, ["url"]), agent_action="web_open", timeout=45, label="Opening {url}",
+             external_transmission=True),
     ToolSpec("web_read", "Read the background browser's current page: title, some text, and numbered controls (links, buttons, inputs). "
              "Pass find to list only controls whose label contains it (e.g. 'add to cart'); offset pages through more controls.",
              obj({"find": S, "offset": I}), agent_action="web_read", timeout=30, label="Reading the page"),
@@ -85,7 +93,8 @@ TOOLS: list[ToolSpec] = [
              obj({"n": I}, ["n"]), agent_action="web_click", timeout=30, label="Clicking on the page"),
     ToolSpec("web_type", "Type into input n from the last web_read, e.g. a search box or a delivery address field; submit=true presses "
              "Enter. Password, card, OTP and UPI fields are refused by design.",
-             obj({"n": I, "text": S, "submit": B}, ["n", "text"]), agent_action="web_type", timeout=30, label="Typing on the page"),
+             obj({"n": I, "text": S, "submit": B}, ["n", "text"]), agent_action="web_type", timeout=30, label="Typing on the page",
+             external_transmission=True),
     ToolSpec("volume", "Get or change the system volume. action: get, set (with level 0-100), up, down (step default 10), mute, unmute.",
              obj({"action": S, "level": I, "step": I}, ["action"]), agent_action="volume", label="Adjusting volume"),
     ToolSpec("play_music", "Play a specific song (or artist) on Spotify: searches Spotify, starts the best match and confirms "
@@ -111,7 +120,8 @@ TOOLS: list[ToolSpec] = [
              "and say where it goes: key_param (query parameter name, e.g. 'appid', 'apiKey') or key_header (e.g. 'X-Api-Key'); "
              "you never see the key. Only the public internet is reachable.",
              obj({"url": S, "params": S, "use_key": S, "key_param": S, "key_header": S}, ["url"]),
-             timeout=45, label="Calling {url}"),
+             timeout=45, label="Calling {url}",
+             external_transmission=True),
     # Using any app by sight, like a person: look, click, type, scroll.
     ToolSpec("screen_click", "Click something visible on screen, in any app, by describing it: e.g. 'the Search box in the Spotify window', "
              "'the Play button', 'the chat named Mom in WhatsApp', 'File menu in Notepad'. JARVIS takes a fresh screenshot, finds it and "
@@ -168,7 +178,8 @@ TOOLS: list[ToolSpec] = [
              obj({"path": S}, ["path"]), agent_action="open_path", label="Opening {path}"),
     ToolSpec("download_file", "Download a file from a direct link (PDF, document, image, video, audio, archive) into Downloads\\JARVIS and open it "
              "on screen with its default Windows app (open=false to only save it). Programs and scripts are refused by design.",
-             obj({"url": S, "open": B}, ["url"]), agent_action="download_file", timeout=600, label="Downloading {url}"),
+             obj({"url": S, "open": B}, ["url"]), agent_action="download_file", timeout=600, label="Downloading {url}",
+             external_transmission=True),
     # Gmail and WhatsApp are read in JARVIS's background browser, where the user signs in / links once. Read-only.
     ToolSpec("gmail_list", "List the user's newest emails as numbered rows (sender, subject, snippet, date, unread). query is Gmail search "
              "syntax; the default 'in:inbox category:primary' leaves out promotions and social. Examples: 'is:unread category:primary', "
@@ -302,7 +313,8 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("deep_research", "Research a big question over several rounds across the web, the user's stored documents and connected "
              "apps, and get numbered sources to cite. Takes minutes: use it for reports and comparisons, and web_research for a quick "
              "fact. rounds: 1-5, default 3. my_data: false to use only the public web.",
-             obj({"question": S, "rounds": I, "my_data": B}, ["question"]), timeout=480, label="Researching {question}"),
+             obj({"question": S, "rounds": I, "my_data": B}, ["question"]), timeout=480, label="Researching {question}",
+             external_transmission=True),
     # Always-running agents (agents.py) and workflows (workflows.py)
     ToolSpec("create_agent", "Start an always-running agent: a goal JARVIS keeps working on over days or weeks, waking every every_min "
              "minutes (at least 15, default 60), with a notebook it keeps between wakes. It speaks only when it has something to say. Use "
@@ -320,13 +332,15 @@ TOOLS: list[ToolSpec] = [
     # Other agents (a2a.py) and coding tools (agent: coding.py)
     ToolSpec("ask_agent", "Send a request to another AI agent over the A2A protocol, at its address, and get its answer. If it needs a "
              "key, the user saves it in Customize > API keys under the agent's host name. Don't include private data unless the user asked.",
-             obj({"url": S, "text": S}, ["url", "text"]), risk="confirm", timeout=320, label="Ask the agent at {url}"),
+             obj({"url": S, "text": S}, ["url", "text"]), risk="confirm", timeout=320, label="Ask the agent at {url}",
+             external_transmission=True),
     ToolSpec("coding_tools", "Which coding agents are installed on this PC (Claude Code, OpenCode, OpenHands).", obj(),
              agent_action="coding_tools", timeout=20, label="Checking coding tools"),
     ToolSpec("hand_off_code", "Hand a coding job in a project folder to a coding agent on this PC and get its report. tool: claude, "
              "opencode or openhands. It works by itself and can change files in that folder. minutes: how long it may take (default 20, "
              "at most 60).", obj({"tool": S, "folder": S, "task": S, "minutes": I}, ["tool", "folder", "task"]), risk="confirm",
-             agent_action="hand_off_code", timeout=3660, label="Hand this to {tool}: {task}"),
+             agent_action="hand_off_code", timeout=3660, label="Hand this to {tool}: {task}",
+             external_transmission=True),
     # System extras
     ToolSpec("hardware_info", "Graphics card (name, load, memory, temperature) and temperatures of this PC, best effort.",
              obj(), agent_action="hardware_info", timeout=40, label="Checking the hardware"),
@@ -353,6 +367,7 @@ OBSERVE_TOOLS = frozenset({"look_at_screen", "system_status", "clipboard_get", "
                            "read_document", "stored_files", "read_webpage"})
 
 BY_NAME = {t.name: t for t in TOOLS}
+EXTERNAL_TOOLS = frozenset(t.name for t in TOOLS if t.external_transmission)
 
 
 FALLBACK_LABELS = {"run_command": "Running a command"}

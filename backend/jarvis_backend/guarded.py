@@ -72,6 +72,8 @@ class AuditEventType(str, Enum):
     CLOUD_CONSENT_MISSING = "cloud_consent_missing"
     CLOUD_CONSENT_MISMATCH = "cloud_consent_mismatch"
     PROVIDER_SWITCHED = "provider_switched"
+    TOOL_BLOCKED_STRICT = "tool_blocked_strict"
+    TOOL_GATED_GUARDED = "tool_gated_guarded"
 
 
 @dataclass

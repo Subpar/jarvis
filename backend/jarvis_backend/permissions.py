@@ -3,7 +3,12 @@
 Every tool call is mapped to a capability (or to none, for harmless and read-only steps), and the user's
 policy for that capability decides whether it runs, asks first, or is refused. A few capabilities are
 locked to at least Ask: they can be blocked, never silently allowed. Anyone else's install starts with
-every change on Ask; the owner's "Full control" turns the everyday ones to Allow in one go."""
+every change on Ask; the owner's "Full control" turns the everyday ones to Allow in one go.
+
+Privacy-mode integration:
+  In **strict** mode, any tool with external_transmission=True is blocked outright (the tool's own
+  permission level is irrelevant). In **guarded** mode, those tools are forced to Ask even if the
+  user's saved policy says Allow."""
 from __future__ import annotations
 
 import re
@@ -137,8 +142,33 @@ def policy(cap: str, saved: dict[str, str] | None, full_control: bool) -> str:
 
 
 def decide(spec: ToolSpec, args: dict[str, Any], saved: dict[str, str] | None = None, full_control: bool = False,
-           read_private: bool = False) -> tuple[str, str | None]:
-    """(allow | ask | block, capability) for one tool call. read_private: private data was read earlier in this request."""
+           read_private: bool = False, privacy_mode: str = "strict") -> tuple[str, str | None]:
+    """(allow | ask | block, capability) for one tool call.
+
+    read_private: private data was read earlier in this request.
+    privacy_mode: "strict" blocks all external_transmission tools;
+                  "guarded" forces them to at least Ask.
+    """
+    # ── Privacy-mode gate for external-transmission tools ──────────────────
+    if spec.external_transmission:
+        if privacy_mode == "strict":
+            return "block", "send_data_out"
+        if privacy_mode == "guarded":
+            # In guarded mode external tools are forced to at least Ask,
+            # but the normal permission logic may already block them.
+            cap = capability(spec, args)
+            web_calendar = spec.name == "calendar_add" and str(args.get("calendar") or "").lower() in ("google", "outlook_web")
+            if read_private and (spec.name in SENDS_OUT or spec.risk == "connector" or web_calendar or
+                                 spec.name == "run_command" and _UPLOADS.search(str(args.get("command", "")))):
+                cap = "send_data_out"
+            if cap is None:
+                cap = "send_data_out"
+            p = policy(cap, saved, full_control)
+            # Guarded: never allow silently — force ask at minimum
+            if p == "allow":
+                p = "ask"
+            return p, cap
+
     cap = capability(spec, args)
     web_calendar = spec.name == "calendar_add" and str(args.get("calendar") or "").lower() in ("google", "outlook_web")
     if read_private and (spec.name in SENDS_OUT or spec.risk == "connector" or web_calendar or
