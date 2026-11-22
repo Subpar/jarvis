@@ -141,8 +141,8 @@ class TestPhasePlan:
     def test_phase4_is_complete(self):
         assert PHASES["phase4"].complete
 
-    def test_phase5_is_not_complete(self):
-        assert not PHASES["phase5"].complete
+    def test_phase5_is_complete(self):
+        assert PHASES["phase5"].complete
 
     def test_all_tasks_have_ids(self):
         for phase in PHASES.values():
@@ -193,11 +193,10 @@ class TestPhaseRunner:
         tasks = self.runner.next_tasks("phase4")
         assert len(tasks) == 0
 
-    def test_next_tasks_phase5(self):
-        """Phase 5 task 1 depends on consent_dialog + phase3_tests (all passed) so it's available."""
+    def test_next_tasks_phase5_complete(self):
+        """Phase 5 is fully passed — no next tasks remain."""
         tasks = self.runner.next_tasks("phase5")
-        assert len(tasks) >= 1
-        assert tasks[0].id == "e2e_privacy_flow"
+        assert len(tasks) == 0
 
     def test_next_tasks_invalid_phase(self):
         assert self.runner.next_tasks("nonexistent") == []
