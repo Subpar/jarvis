@@ -86,6 +86,8 @@ export default function ChatView({
   goSettings,
   reload = 0,
   voice = "off",
+  privacyMode = "strict" as "strict" | "guarded",
+  isCloudProvider = false,
 }: {
   conn: Connection | null;
   configured: boolean;
@@ -96,11 +98,16 @@ export default function ChatView({
   goSettings: () => void;
   reload?: number; // bumped when a live voice turn was saved to this conversation
   voice?: Voice;
+  privacyMode?: "strict" | "guarded";
+  isCloudProvider?: boolean;
 }) {
   const [lines, setLines] = useState<Line[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // Cloud consent: in guarded mode with a cloud provider, user must check a box per message
+  const needsConsent = privacyMode === "guarded" && isCloudProvider;
+  const [cloudConsent, setCloudConsent] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -168,8 +175,16 @@ export default function ChatView({
   const send = async (spoken?: string) => {
     const text = (spoken ?? input).trim();
     if (!conn || !text || streaming) return;
+    // In guarded mode with a cloud provider, require consent checkbox
+    if (needsConsent && !cloudConsent && spoken === undefined) {
+      setNotice({ tone: "warn", text: "Please check the cloud consent box before sending to a cloud provider." });
+      return;
+    }
     if (spoken === undefined) setInput("");
     setNotice(null);
+    // Reset consent checkbox after each message
+    const consentGiven = needsConsent && cloudConsent;
+    if (consentGiven) setCloudConsent(false);
     emitSend();
     onActivity("thinking");
     const tempUser = `u-${Date.now()}`;
@@ -224,7 +239,7 @@ export default function ChatView({
       setLines((l) => l.map((x) => (x.id === tempReply ? { ...x, content: x.content + piece } : x)));
     };
     try {
-      await streamChat(conn, { message: text, conversation_id: conversationId, voice: spoken !== undefined }, ctrl.signal, {
+      await streamChat(conn, { message: text, conversation_id: conversationId, voice: spoken !== undefined, ...(consentGiven ? { cloud_consent: true } : {}) }, ctrl.signal, {
         meta: (d) => {
           if (d.conversation_id !== ownConversation.current) {
             ownConversation.current = d.conversation_id;
@@ -379,6 +394,12 @@ export default function ChatView({
             <div className="voice-hint">{HINT[voice]}</div>
           </div>
         ) : (
+        {needsConsent && (
+          <label className="cloud-consent">
+            <input type="checkbox" checked={cloudConsent} onChange={(e) => setCloudConsent(e.target.checked)} />
+            <span>I consent to sending this message to the cloud provider</span>
+          </label>
+        )}
         <div className={`composer ${streaming ? "busy" : ""}`}>
           <button className="mic to-voice" onClick={() => chooseText(false)} aria-label="Back to voice" title="Back to voice mode">
             <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg>

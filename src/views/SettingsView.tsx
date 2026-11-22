@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import PermissionsCard from "./PermissionsCard";
+import PrivacyCard from "./PrivacyCard";
 import SystemCard from "./SystemCard";
 import BackupCard from "./BackupCard";
 import DeveloperCard from "./DeveloperCard";
@@ -502,7 +503,10 @@ export default function SettingsView({ conn, onChanged }: { conn: Connection | n
           </section>
           </>
         )}
-        {tab === "permissions" && <PermissionsCard conn={conn} fullControl={!!s.full_control} onChanged={() => { onChanged(); load(); }} />}
+        {tab === "permissions" && <>
+          <PrivacyCard conn={conn} settings={s} onChanged={() => { onChanged(); load(); }} />
+          <PermissionsCard conn={conn} fullControl={!!s.full_control} onChanged={() => { onChanged(); load(); }} />
+        </>}
         {tab === "system" && <SystemCard conn={conn} />}
       </div>
     </div>

@@ -45,6 +45,7 @@ export interface Settings {
   voice_mode?: "live" | "local";
   api_key_hint: string;
   providers_with_keys: string[];
+  privacy_mode: "strict" | "guarded";
   load_error: string | null;
 }
 
@@ -65,7 +66,7 @@ export interface ModelInfo {
   kind: "chat" | "embed";
 }
 
-export type SettingsUpdate = Partial<Pick<Settings, "user_name" | "address" | "proactive_alerts" | "startup_briefing" | "full_control" | "permissions" | "presence_greetings" | "followups" | "onboarded" | "instructions" | "language" | "theme" | "calendar_outlook" | "provider" | "base_url" | "chat_model" | "embed_model">> & {
+export type SettingsUpdate = Partial<Pick<Settings, "user_name" | "address" | "proactive_alerts" | "startup_briefing" | "full_control" | "permissions" | "presence_greetings" | "followups" | "onboarded" | "instructions" | "language" | "theme" | "calendar_outlook" | "provider" | "base_url" | "chat_model" | "embed_model" | "privacy_mode">> & {
   api_key?: string;
 };
 
@@ -101,6 +102,29 @@ export interface Quota {
   tokens?: { input: number; output: number; cached: number };
 }
 export const getQuota = (c: Connection) => call<Quota>(c, "/api/quota");
+
+// ---------- privacy / guarded mode ----------
+
+export interface VerificationResult {
+  provider_id: string;
+  verified: boolean;
+  latency_ms?: number;
+  detail?: string;
+}
+export interface AuditEntry {
+  event_type: string;
+  timestamp: number;
+  provider_id?: string;
+  model?: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+export const verifyProvider = (c: Connection) =>
+  call<VerificationResult>(c, "/api/provider/verify", { method: "POST", body: "{}" });
+export const getVerificationStatus = (c: Connection) =>
+  call<{ verifications: Array<{ provider_id: string; model: string; verified: boolean; last_check: number; latency_ms?: number }> }>(c, "/api/provider/verify");
+export const getAuditLog = (c: Connection, n = 50) =>
+  call<{ entries: AuditEntry[] }>(c, `/api/audit?n=${n}`);
 
 // ---------- voice ----------
 
@@ -369,7 +393,7 @@ export interface ChatHandlers {
 /** Streams a reply over server-sent events. Abort the signal to stop generation. */
 export async function streamChat(
   c: Connection,
-  body: { message: string; conversation_id?: string | null; voice?: boolean },
+  body: { message: string; conversation_id?: string | null; voice?: boolean; cloud_consent?: boolean },
   signal: AbortSignal,
   on: ChatHandlers,
 ): Promise<void> {

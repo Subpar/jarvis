@@ -135,8 +135,14 @@ class TestPhasePlan:
         for pid in ("phase0", "phase1", "phase2"):
             assert PHASES[pid].complete, f"{pid} should be marked complete"
 
-    def test_phase3_is_not_complete(self):
-        assert not PHASES["phase3"].complete
+    def test_phase3_is_complete(self):
+        assert PHASES["phase3"].complete
+
+    def test_phase4_is_complete(self):
+        assert PHASES["phase4"].complete
+
+    def test_phase5_is_not_complete(self):
+        assert not PHASES["phase5"].complete
 
     def test_all_tasks_have_ids(self):
         for phase in PHASES.values():
@@ -177,17 +183,21 @@ class TestPhaseRunner:
         assert len(phases) == 6
         assert phases[0]["id"] == "phase0"
 
-    def test_next_tasks_phase3(self):
-        """Phase 3 task 1 has no unmet deps (its dep is in phase2 which is passed)."""
+    def test_next_tasks_phase3_complete(self):
+        """Phase 3 is fully passed — no next tasks remain."""
         tasks = self.runner.next_tasks("phase3")
-        assert len(tasks) >= 1
-        assert tasks[0].id == "tool_transmission_flag"
+        assert len(tasks) == 0
 
-    def test_next_tasks_respects_dependencies(self):
-        """tool_gate_integration depends on tool_transmission_flag, so it shouldn't be in next_tasks."""
-        tasks = self.runner.next_tasks("phase3")
-        task_ids = [t.id for t in tasks]
-        assert "tool_gate_integration" not in task_ids
+    def test_next_tasks_phase4_complete(self):
+        """Phase 4 is fully passed — no next tasks remain."""
+        tasks = self.runner.next_tasks("phase4")
+        assert len(tasks) == 0
+
+    def test_next_tasks_phase5(self):
+        """Phase 5 task 1 depends on consent_dialog + phase3_tests (all passed) so it's available."""
+        tasks = self.runner.next_tasks("phase5")
+        assert len(tasks) >= 1
+        assert tasks[0].id == "e2e_privacy_flow"
 
     def test_next_tasks_invalid_phase(self):
         assert self.runner.next_tasks("nonexistent") == []

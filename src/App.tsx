@@ -4,7 +4,7 @@ import type { Activity } from "./fx/activity";
 import { useTelemetry } from "./telemetry";
 import { setTheme } from "./theme";
 import { Connection, Overall, ShellStatus, getConnection, getStatus, insideShell, onStatus } from "./shell";
-import { BROWSER_TOOLS, Quota, VoiceEvent, getQuota, getSettings, getVoiceEvents, getVoiceSeq, startBriefing, stopSpeaking, toggleBrowserPanel } from "./api";
+import { BROWSER_TOOLS, Quota, VoiceEvent, getProviders, getQuota, getSettings, getVoiceEvents, getVoiceSeq, startBriefing, stopSpeaking, toggleBrowserPanel } from "./api";
 import TaskPanel from "./views/TaskPanel";
 import ModelPicker from "./views/ModelPicker";
 import Onboarding from "./views/Onboarding";
@@ -366,6 +366,8 @@ export default function App() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [address, setAddress] = useState("sir");
+  const [privacyMode, setPrivacyMode] = useState<"strict" | "guarded">("strict");
+  const [isCloudProvider, setIsCloudProvider] = useState(false);
   const [activity, setActivity] = useState<Activity>("idle");
   const [conversation, setConversation] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
@@ -403,6 +405,12 @@ export default function App() {
         setAddress(s.address || "sir");
         setLang(s.language);
         if (s.theme) setTheme(s.theme);
+        setPrivacyMode(s.privacy_mode ?? "strict");
+        // Determine if the current provider is cloud-based
+        getProviders(conn).then((presets) => {
+          const p = presets.find((pr) => pr.id === s.provider);
+          setIsCloudProvider(p ? !(p as Record<string, unknown>).is_local : false);
+        }).catch(() => {});
       })
       .catch(() => setConfigured(false));
   }, [conn]);
@@ -508,6 +516,8 @@ export default function App() {
           goSettings={() => setDrawer("settings")}
           reload={reload}
           voice={voice}
+          privacyMode={privacyMode}
+          isCloudProvider={isCloudProvider}
         />
       </main>
 
