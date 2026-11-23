@@ -610,6 +610,70 @@ def build_router(svc: Services, require_auth: Callable[..., None]) -> APIRouter:
             return {"entries": []}
         return {"entries": svc.llm.guarded.audit.recent(min(n, 500))}
 
+    # ---------------- phase audit (LLM-based) ----------------
+
+    @r.get("/phase-audit/status")
+    async def phase_audit_status() -> dict[str, Any]:
+        """Return all phases and their task statuses."""
+        from .phase_audit import PHASES
+        result = {}
+        for pid, phase in PHASES.items():
+            result[pid] = {
+                "name": phase.name,
+                "complete": phase.complete,
+                "tasks": [
+                    {"id": t.id, "name": t.name, "status": t.status,
+                     "criteria_count": len(t.acceptance_criteria)}
+                    for t in phase.tasks
+                ],
+            }
+        return result
+
+    @r.post("/phase-audit/run")
+    async def run_phase_audit(
+        phase_id: str | None = None,
+        task_id: str | None = None,
+        model: str = "qwen2.5-coder-32k",
+        ollama_url: str = "http://localhost:11434",
+    ) -> dict[str, Any]:
+        """Run the LLM-based audit for a phase/task via local Ollama.
+
+        POST /phase-audit/run?phase_id=phase2&model=qwen2.5-coder-32k
+        """
+        from .phase_audit import PHASES, PhaseRunner
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        audit_path = repo_root / "backend" / "audit_results.jsonl"
+        runner = PhaseRunner(repo_root=repo_root, audit_path=audit_path)
+
+        tasks_to_audit: list[tuple[str, str]] = []
+        if phase_id and task_id:
+            tasks_to_audit.append((phase_id, task_id))
+        elif phase_id:
+            phase = PHASES.get(phase_id)
+            if not phase:
+                raise HTTPException(status_code=404, detail=f"Phase '{phase_id}' not found")
+            for task in phase.tasks:
+                tasks_to_audit.append((phase_id, task.id))
+        else:
+            for pid, phase in PHASES.items():
+                for task in phase.tasks:
+                    tasks_to_audit.append((pid, task.id))
+
+        results = []
+        for pid, tid in tasks_to_audit:
+            result = await runner.audit_task(pid, tid, model=model, ollama_url=ollama_url)
+            results.append({
+                "phase_id": result.phase_id,
+                "task_id": result.task_id,
+                "passed": result.passed,
+                "findings": result.findings,
+                "model_used": result.model_used,
+            })
+
+        passed = sum(1 for r in results if r["passed"])
+        failed = len(results) - passed
+        return {"passed": passed, "failed": failed, "total": len(results), "results": results}
+
     # ---------------- conversations ----------------
 
     def _conv_or_404(conv_id: str) -> dict[str, Any]:

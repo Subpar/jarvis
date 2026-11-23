@@ -556,6 +556,97 @@ class PhaseRunner:
             except OSError:
                 log.exception("failed to write phase audit result")
 
+    async def audit_task(
+        self,
+        phase_id: str,
+        task_id: str,
+        model: str = "qwen2.5-coder-32k",
+        ollama_url: str = "http://localhost:11434",
+    ) -> AuditResult:
+        """Run the LLM-based audit of a task against its acceptance criteria.
+
+        Sends the audit prompt to the LOCAL Ollama model and parses the response.
+        Source code never leaves the machine.
+        """
+        import httpx
+
+        prompts = self.build_audit_prompt(phase_id, task_id)
+        if not prompts:
+            return AuditResult(
+                task_id=task_id, phase_id=phase_id, passed=False,
+                timestamp=time.time(), findings=["Task or phase not found"],
+                model_used=model,
+            )
+
+        system_prompt, user_prompt = prompts
+
+        # Call Ollama chat API
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(
+                    f"{ollama_url}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "stream": False,
+                        "options": {"temperature": 0.1, "num_ctx": 32768},
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                reply = data.get("message", {}).get("content", "")
+        except Exception as e:
+            result = AuditResult(
+                task_id=task_id, phase_id=phase_id, passed=False,
+                timestamp=time.time(),
+                findings=[f"Ollama call failed: {e}"],
+                model_used=model,
+            )
+            self.record_result(result)
+            return result
+
+        # Parse the LLM response for criterion results and final verdict
+        criteria_results = []
+        findings = []
+        passed = False
+
+        # Extract JSON objects from the response
+        import re as _re
+        json_blocks = _re.findall(r'\{[^{}]+\}', reply)
+        for block in json_blocks:
+            try:
+                obj = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+
+            if "verdict" in obj:
+                passed = obj["verdict"].upper() == "PASS"
+                if obj.get("summary"):
+                    findings.append(f"Verdict: {obj['summary']}")
+                for issue in obj.get("blocking_issues", []):
+                    findings.append(f"BLOCKING: {issue}")
+            elif "criterion" in obj:
+                criteria_results.append(obj)
+                if not obj.get("passed"):
+                    findings.append(f"FAIL: {obj.get('criterion', '?')} — {obj.get('finding', '')}")
+
+        # If no verdict JSON found, treat as failure
+        if not any("verdict" in block for block in json_blocks
+                    if block.startswith("{")):
+            findings.append("No structured verdict found in model response")
+            findings.append(f"Raw response (first 500 chars): {reply[:500]}")
+
+        result = AuditResult(
+            task_id=task_id, phase_id=phase_id, passed=passed,
+            timestamp=time.time(), findings=findings,
+            model_used=model, criteria_results=criteria_results,
+        )
+        self.record_result(result)
+        return result
+
     def results(self) -> list[dict[str, Any]]:
         return [r.to_dict() for r in self._results]
 
